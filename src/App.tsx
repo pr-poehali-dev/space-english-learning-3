@@ -1,5 +1,77 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+
+// ===================== TTS =====================
+
+const TTS_URL = "https://functions.poehali.dev/74d72ca4-f171-4413-85b2-d95cec6d47a9";
+
+async function speakText(text: string): Promise<void> {
+  const resp = await fetch(TTS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, lang: "en" }),
+  });
+  if (!resp.ok) throw new Error("TTS error");
+  const data = await resp.json();
+  const binary = atob(data.audio);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: "audio/mpeg" });
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  audio.play();
+  audio.onended = () => URL.revokeObjectURL(url);
+}
+
+function useTTS() {
+  const [loading, setLoading] = useState<string | null>(null);
+  const speak = useCallback(async (text: string, id?: string) => {
+    const key = id ?? text;
+    setLoading(key);
+    try { await speakText(text); } finally { setLoading(null); }
+  }, []);
+  return { speak, loading };
+}
+
+function SpeakBtn({ text, id, size = 16 }: { text: string; id?: string; size?: number }) {
+  const { speak, loading } = useTTS();
+  const key = id ?? text;
+  const busy = loading === key;
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); speak(text, key); }}
+      disabled={busy}
+      title={`Произнести: ${text}`}
+      style={{
+        background: busy ? "rgba(6,182,212,0.3)" : "rgba(6,182,212,0.15)",
+        border: "1px solid rgba(6,182,212,0.4)",
+        borderRadius: "6px",
+        padding: "3px 6px",
+        cursor: busy ? "wait" : "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "3px",
+        transition: "all 0.15s",
+        verticalAlign: "middle",
+        marginLeft: "4px",
+      }}
+    >
+      {busy
+        ? <span style={{ display: "inline-flex", gap: "2px", alignItems: "center" }}>
+            {[0,1,2].map(i => (
+              <span key={i} style={{
+                width: 3, height: 10, borderRadius: 2,
+                background: "#06B6D4",
+                animation: "wave 0.8s ease-in-out infinite",
+                animationDelay: `${i * 0.15}s`,
+              }} />
+            ))}
+          </span>
+        : <Icon name="Volume2" size={size} style={{ color: "#67E8F9" }} />
+      }
+    </button>
+  );
+}
 
 // ===================== DATA =====================
 
@@ -274,6 +346,7 @@ function NavBar({ active, setActive }: { active: string; setActive: (s: string) 
 
 function TWord({ word, trans }: { word: string; trans: string }) {
   const [show, setShow] = useState(false);
+  const { speak, loading } = useTTS();
   return (
     <span
       className="translate-word inline"
@@ -283,8 +356,15 @@ function TWord({ word, trans }: { word: string; trans: string }) {
     >
       {word}
       {show && (
-        <span className="tooltip-translate">
-          <div>{trans}</div>
+        <span className="tooltip-translate" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span>{trans}</span>
+          <span
+            onClick={e => { e.stopPropagation(); speak(word, `tword-${word}`); }}
+            style={{ cursor: "pointer", opacity: loading === `tword-${word}` ? 0.5 : 1 }}
+            title="Произнести"
+          >
+            <Icon name="Volume2" size={13} style={{ color: "#67E8F9", display: "inline" }} />
+          </span>
         </span>
       )}
     </span>
@@ -417,7 +497,15 @@ function LessonsPage() {
                 <div className="text-white text-sm font-semibold">{lesson.grammar}</div>
                 <div className="text-white/50 text-xs">{lesson.grammarRu}</div>
               </div>
-              <div className="text-sm text-white/40 mb-2">👇 Наведи на подчёркнутые слова для перевода</div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm text-white/40">👇 Наведи на слова для перевода</span>
+                <SpeakBtn
+                  text={lesson.text.map(p => p.en).join("")}
+                  id={`lesson-${lesson.id}`}
+                  size={14}
+                />
+                <span className="text-white/30 text-xs">Прочитать вслух</span>
+              </div>
               <div className="text-white text-base leading-8 mb-4 p-4 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
                 {lesson.text.map((part, i) =>
                   part.key
@@ -668,10 +756,11 @@ function ListeningPage() {
           {showTranscript ? (
             <div className="space-y-3">
               {lesson.transcript.map((line, i) => (
-                <div key={i} className={`p-2 rounded-lg ${line.key ? "" : ""}`} style={line.key ? { background: "rgba(245,158,11,0.08)" } : {}}>
-                  <div className="flex gap-3">
+                <div key={i} className="p-2 rounded-lg" style={line.key ? { background: "rgba(245,158,11,0.08)" } : {}}>
+                  <div className="flex gap-3 items-start">
                     <div className="flex-1">
                       <span className={`text-sm leading-6 ${line.key ? "text-yellow-200 font-semibold" : "text-white"}`}>{line.en}</span>
+                      <SpeakBtn text={line.en.trim()} id={`tr-${i}`} size={13} />
                       {line.key && <div className="text-yellow-500/70 text-xs mt-0.5 font-mono">{line.word} → {line.wordRu}</div>}
                     </div>
                     <div className="text-white/40 text-xs leading-6 w-40 sm:w-52 shrink-0">{line.ru}</div>
@@ -740,21 +829,27 @@ function VocabPage() {
           {VOCAB_WORDS.map((w, i) => (
             <div key={i} className={`vocab-card ${flipped === i ? "flipped" : ""}`} style={{ height: 148 }} onClick={() => setFlipped(flipped === i ? null : i)}>
               <div className="vocab-inner" style={{ height: 148 }}>
-                <div className={`vocab-front glass-card p-4 flex flex-col items-center justify-center text-center`} style={{ height: 148, border: known.includes(i) ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(255,255,255,0.1)", background: known.includes(i) ? "rgba(34,197,94,0.06)" : undefined }}>
-                  <div className="text-white/30 text-xs mb-2">EN</div>
-                  <div className="text-white font-bold text-lg">{w.en}</div>
+                <div className="vocab-front glass-card p-4 flex flex-col items-center justify-center text-center" style={{ height: 148, border: known.includes(i) ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(255,255,255,0.1)", background: known.includes(i) ? "rgba(34,197,94,0.06)" : undefined }}>
+                  <div className="text-white/30 text-xs mb-1">EN</div>
+                  <div className="flex items-center gap-1 justify-center">
+                    <span className="text-white font-bold text-lg">{w.en}</span>
+                    <SpeakBtn text={w.en} id={`vocab-${i}`} size={14} />
+                  </div>
                   {known.includes(i) && <div className="text-green-400 text-xs mt-1">✅ Знаю</div>}
                 </div>
                 <div className="vocab-back p-4 flex flex-col items-center justify-center text-center" style={{ height: 148, background: "rgba(147,51,234,0.2)", border: "1px solid rgba(147,51,234,0.4)", borderRadius: "1.25rem" }}>
                   <div className="text-purple-300 text-xs mb-1">RU</div>
-                  <div className="text-yellow-300 font-bold text-base mb-2">{w.ru}</div>
+                  <div className="text-yellow-300 font-bold text-sm mb-1">{w.ru}</div>
                   <div className="text-white/45 text-xs leading-tight mb-2">{w.context}</div>
-                  <button
-                    className="btn-green text-xs py-1 px-3"
-                    onClick={e => { e.stopPropagation(); setKnown(k => k.includes(i) ? k.filter(x => x !== i) : [...k, i]); }}
-                  >
-                    {known.includes(i) ? "Убрать" : "Знаю ✅"}
-                  </button>
+                  <div className="flex gap-2 justify-center">
+                    <SpeakBtn text={w.en} id={`vocab-back-${i}`} size={13} />
+                    <button
+                      className="btn-green text-xs py-1 px-3"
+                      onClick={e => { e.stopPropagation(); setKnown(k => k.includes(i) ? k.filter(x => x !== i) : [...k, i]); }}
+                    >
+                      {known.includes(i) ? "Убрать" : "Знаю ✅"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -849,11 +944,22 @@ function DictionaryPage() {
           <div className="glass-card p-6 animate-fade-in-up border border-purple-500/30">
             <button className="btn-outline text-sm py-1 px-3 mb-4" onClick={() => setActiveWord(null)}>← Назад</button>
             <div className="text-center mb-4">
-              <div className="text-4xl font-black text-white mb-2">{activeWord.en}</div>
+              <div className="flex items-center justify-center gap-3 mb-2">
+                <span className="text-4xl font-black text-white">{activeWord.en}</span>
+                <SpeakBtn text={activeWord.en} id={`dict-active`} size={22} />
+              </div>
               <div className="text-2xl text-yellow-300 font-bold mb-3">{activeWord.ru}</div>
               <div className="text-white/60 text-sm leading-relaxed p-4 rounded-xl italic" style={{ background: "rgba(255,255,255,0.05)" }}>
                 💬 {activeWord.context}
               </div>
+              <button
+                className="btn-cyan mt-4"
+                style={{ background: "rgba(6,182,212,0.2)", border: "1px solid rgba(6,182,212,0.4)", borderRadius: "0.75rem", padding: "0.5rem 1.25rem", color: "#67E8F9", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}
+                onClick={() => speakText(activeWord.context)}
+              >
+                <Icon name="Volume2" size={16} style={{ color: "#67E8F9" }} />
+                Произнести пример
+              </button>
             </div>
           </div>
         ) : (
@@ -864,9 +970,10 @@ function DictionaryPage() {
                 className="glass-card p-4 border border-white/10 hover:border-purple-400/40 cursor-pointer transition-all hover:translate-x-1 flex items-center justify-between"
                 onClick={() => setActiveWord(w)}
               >
-                <div>
+                <div className="flex items-center gap-2">
                   <span className="text-white font-bold">{w.en}</span>
-                  <span className="text-white/30 mx-2">—</span>
+                  <SpeakBtn text={w.en} id={`dict-list-${i}`} size={13} />
+                  <span className="text-white/30 mx-1">—</span>
                   <span className="text-yellow-300">{w.ru}</span>
                 </div>
                 <Icon name="ChevronRight" className="text-white/30" size={18} />

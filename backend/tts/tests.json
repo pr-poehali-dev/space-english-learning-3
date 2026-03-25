@@ -1,0 +1,29 @@
+{
+  "tests": [
+    {
+      "name": "TTS single word",
+      "method": "POST",
+      "path": "/",
+      "body": {"text": "orbit", "lang": "en"},
+      "expectedStatus": 200,
+      "expectedBody": {"audio": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "TTS phrase",
+      "method": "POST",
+      "path": "/",
+      "body": {"text": "We have liftoff!", "lang": "en"},
+      "expectedStatus": 200,
+      "expectedBody": {"audio": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "OPTIONS cors",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    }
+  ]
+}
